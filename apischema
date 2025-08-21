@@ -1,0 +1,142 @@
+openapi: 3.0.0
+info:
+  title: OCR via Grok4 Function
+  version: "1.0.0"
+  description: >
+    Invokes an OCI Function that performs OCR by sending an image (URL, OCI URI, or base64)
+    to OCI Generative AI (Grok 4). Returns extracted text.
+
+servers:
+  - url: https://{functionsHost}
+    variables:
+      functionsHost:
+        default: fht7ns4mn2q.us-ashburn-1.functions.oci.oraclecloud.com
+        description: Base host from your function's invoke endpoint.
+
+paths:
+  /20181201/functions/{functionId}/actions/invoke:
+    post:
+      operationId: ocrImageWithGrok4
+      summary: OCR an image using the Grok 4-based Function
+      tags: [ocr]
+      parameters:
+        - in: path
+          name: functionId
+          required: true
+          description: OCID of the target Function to invoke.
+          schema:
+            type: string
+            example: ocid1.fnfunc.oc1.iad.aaaaaaaaexample123
+        - in: header
+          name: fn-invoke-type
+          required: false
+          schema:
+            type: string
+            enum: [sync, detached]
+          description: Invocation type for OCI Functions (default "sync").
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OcrRequest'
+            examples:
+              byExternalUrl:
+                summary: Image from external HTTPS URL
+                value:
+                  image_url: "https://example.com/receipt.jpg"
+                  prompt: "Extract all text. Keep line breaks."
+              byOciUri:
+                summary: Image stored in Object Storage (private)
+                value:
+                  oci_uri: "oci://<namespace>/<bucket>/docs/invoice.png"
+              byBase64:
+                summary: Raw base64 (or data: URL supported)
+                value:
+                  image_base64: "<BASE64_NO_HEADER>"
+      responses:
+        "200":
+          description: OCR succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OcrResponse'
+              examples:
+                ok:
+                  value:
+                    model_id: "ocid1.generativeaimodel.oc1.iad.xxxxxxxxx"
+                    finish_reason: "STOP"
+                    mime: "image/png"
+                    ocr_text: "TOTAL $12.34\nDate: 2025-08-19\n..."
+        "400":
+          description: Bad request (missing or invalid input)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Provide one of image_url, oci_uri, or image_base64"
+        "500":
+          description: Internal error during OCR or Function execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Internal Server Error"
+
+components:
+  schemas:
+    OcrRequest:
+      type: object
+      description: >
+        Provide exactly one image source. prompt is optional.
+        - image_url: HTTPS URL (public or pre-authenticated)
+        - oci_uri: oci://<namespace>/<bucket>/<object_path>
+        - image_base64: raw base64 or full data URL (data:image/png;base64,...)
+      properties:
+        image_url:
+          type: string
+          format: uri
+          description: External HTTPS URL to the image.
+        oci_uri:
+          type: string
+          description: OCI Object Storage URI (oci://<namespace>/<bucket>/<object>).
+        image_base64:
+          type: string
+          description: Raw base64 (or full data URL).
+        prompt:
+          type: string
+          description: Instruction to steer OCR extraction; defaults to plain OCR.
+          default: "Extract all readable text (OCR). Return only the extracted text."
+      additionalProperties: false
+      oneOf:
+        - required: [image_url]
+        - required: [oci_uri]
+        - required: [image_base64]
+
+    OcrResponse:
+      type: object
+      properties:
+        model_id:
+          type: string
+          description: OCID of the OCI GenAI model used (e.g., Grok 4 on-demand).
+        finish_reason:
+          type: string
+          description: Model finish reason.
+        mime:
+          type: string
+          description: Detected MIME type for the input image.
+        ocr_text:
+          type: string
+          description: Extracted text content from the image.
+      required: [model_id, finish_reason, mime, ocr_text]
+      additionalProperties: false
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+      additionalProperties: false
